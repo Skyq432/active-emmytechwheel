@@ -162,7 +162,7 @@
     </nav>
 
     <main class="flex-grow flex flex-col items-center justify-center px-6 py-10">
-        <div class="w-full max-w-xs mx-auto mb-10 px-4">
+        <div class="w-full max-w-xs mx-auto mb-6 px-4">
             <div class="flex justify-between items-end mb-2">
                 <p class="text-[10px] font-800 tracking-[0.15em] text-slate-400 uppercase">Prizes Claimed Today</p>
                 <p class="text-[13px] font-900 text-blue-700 tracking-tighter">
@@ -171,6 +171,20 @@
             </div>
             <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200/50 shadow-inner">
                 <div id="prizeBar" class="h-full bg-gradient-to-r from-blue-700 via-blue-500 to-blue-400 transition-all duration-[2000ms] ease-out" style="width: 82.5%;"></div>
+            </div>
+        </div>
+
+        <div class="w-full max-w-xs mx-auto mb-8 px-4">
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 text-left">
+                    <p class="text-[10px] font-800 tracking-[0.15em] text-slate-400 uppercase mb-2">Spins Left</p>
+                    <p id="dashboardSpinCount" class="text-2xl font-900 text-blue-700 tracking-tight">0</p>
+                </div>
+                <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 text-left">
+                    <p class="text-[10px] font-800 tracking-[0.15em] text-slate-400 uppercase mb-2">Referral Bonus</p>
+                    <p id="referralProgressText" class="text-sm font-900 text-slate-800 tracking-tight">0/2 to free spin</p>
+                    <p id="referralProgressSubtext" class="text-[10px] font-700 text-slate-400 uppercase tracking-wide mt-1">Invite 2 friends</p>
+                </div>
             </div>
         </div>
 
@@ -236,8 +250,8 @@
                         <p id="resultMsg" class="text-white/70 mb-10 font-bold leading-relaxed max-w-xs mx-auto relative"></p>
                         
                         <div class="space-y-4">
-                            <button onclick="claimViaWhatsApp('WIN')" class="w-full bg-green-500 text-white py-6 rounded-[2rem] font-900 shadow-xl flex items-center justify-center gap-2 transform active:scale-95 transition-all">
-                                <i class="fab fa-whatsapp text-2xl"></i> MESSAGE TO CLAIM
+                            <button id="resultWhatsAppBtn" onclick="claimViaWhatsApp()" class="w-full bg-green-500 text-white py-6 rounded-[2rem] font-900 shadow-xl flex items-center justify-center gap-2 transform active:scale-95 transition-all">
+                                <i class="fab fa-whatsapp text-2xl"></i> <span id="resultWhatsAppBtnText">MESSAGE EMMYTECH</span>
                             </button>
                             <button onclick="openShareModal()" class="w-full bg-white text-blue-900 py-6 rounded-[2rem] font-900 shadow-xl flex flex-col items-center justify-center gap-1 transform active:scale-95 transition-transform relative">
                                 <span class="flex items-center gap-2 font-900 text-xl tracking-tighter uppercase italic italic">Request Favor</span>
@@ -362,6 +376,8 @@
             let activeShortLink = "";
             let prizesChannel = null;
             let profileChannel = null;
+        let referralProgress = { converted: 0, pendingToReward: 0, claimed: false };
+        let lastSpinOutcome = 'WIN';
 
         // --- STATS LOGIC ---
         let currentPrizesCount = 165; // Renamed to avoid collision
@@ -378,6 +394,7 @@
 
             const savedPhone = localStorage.getItem('emmy_phone');
             if (savedPhone) await silentLogin(savedPhone);
+            else updateDashboardStats();
             draw(angle);
         }
 
@@ -474,13 +491,76 @@ async function syncWheelData() {
 }
         
 
+function updateDashboardStats() {
+    const spinEl = document.getElementById('dashboardSpinCount');
+    if (spinEl) spinEl.innerText = currentUser ? Math.max(0, Number(currentUser.spins_remaining) || 0) : 0;
+
+    const progressEl = document.getElementById('referralProgressText');
+    const subEl = document.getElementById('referralProgressSubtext');
+    if (!progressEl || !subEl) return;
+
+    if (!currentUser) {
+        progressEl.innerText = '0/2 to free spin';
+        subEl.innerText = 'Invite 2 friends';
+        return;
+    }
+
+    if (referralProgress.claimed) {
+        progressEl.innerText = 'Referral claimed';
+        subEl.innerText = 'Bonus spin unlocked';
+    } else {
+        progressEl.innerText = `${referralProgress.pendingToReward}/2 to free spin`;
+        subEl.innerText = `${referralProgress.converted} successful referral${referralProgress.converted === 1 ? '' : 's'}`;
+    }
+}
+
+async function refreshReferralProgress() {
+    if (!currentUser) {
+        referralProgress = { converted: 0, pendingToReward: 0, claimed: false };
+        updateDashboardStats();
+        return;
+    }
+
+    try {
+        const { data: refs, error } = await sb
+            .from('referrals')
+            .select('id, reward_granted, status')
+            .eq('referrer_id', currentUser.id)
+            .eq('status', 'converted');
+
+        if (error) throw error;
+
+        const converted = refs ? refs.length : 0;
+        const ungranted = refs ? refs.filter(ref => ref.reward_granted !== true).length : 0;
+        const pendingToReward = converted === 0 ? 0 : (ungranted % 2);
+        const claimed = converted > 0 && ungranted > 0 && ungranted % 2 === 0;
+
+        referralProgress = { converted, pendingToReward, claimed };
+        updateDashboardStats();
+    } catch (err) {
+        console.error('Referral progress error:', err);
+        referralProgress = { converted: 0, pendingToReward: 0, claimed: false };
+        updateDashboardStats();
+    }
+}
+
+function setResultWhatsAppState(didWin) {
+    lastSpinOutcome = didWin ? 'WIN' : 'LOSE';
+    const textEl = document.getElementById('resultWhatsAppBtnText');
+    if (textEl) {
+        textEl.innerText = didWin ? 'MESSAGE TO CLAIM' : 'MESSAGE FOR HELP';
+    }
+}
+
         function updateButtonState() {
             const btn = document.getElementById('spinInitBtn');
             if (!currentUser) {
                 btn.innerText = "SPIN TO WIN";
+                btn.style.backgroundColor = "#003399";
                 btn.disabled = false;
             } else if (spinning) {
                 btn.innerText = "LOCKING RESULT...";
+                btn.style.backgroundColor = "#003399";
                 btn.disabled = true;
             } else {
                 if (currentUser.spins_remaining <= 0) {
@@ -493,6 +573,7 @@ async function syncWheelData() {
                     btn.disabled = false;
                 }
             }
+            updateDashboardStats();
         }
 
         function draw(currentAngle) {
@@ -666,6 +747,7 @@ async function handleAuth(e) {
         setupRealtime();
         closeRegistration();
         document.getElementById('navBagBtn').classList.remove('hidden');
+        await refreshReferralProgress();
         updateButtonState();
         // Registration should only unlock the wheel; user decides when to spin.
     } catch (err) {
@@ -680,12 +762,48 @@ async function handleAuth(e) {
         setRegSubmitting(false);
     }
 }
-
         async function checkReferrerReward(referrerId) {
-            const { data: refs } = await sb.from('referrals').select('id').eq('referrer_id', referrerId).eq('status', 'converted');
-            if (refs && refs.length > 0 && refs.length % 2 === 0) {
-                const { data: user } = await sb.from('profiles').select('spins_remaining').eq('id', referrerId).single();
-                if (user) await sb.from('profiles').update({ spins_remaining: user.spins_remaining + 1 }).eq('id', referrerId);
+            const { data: refs, error } = await sb
+                .from('referrals')
+                .select('id, reward_granted')
+                .eq('referrer_id', referrerId)
+                .eq('status', 'converted')
+                .order('created_at', { ascending: true });
+
+            if (error || !refs) return;
+
+            const pendingRefs = refs.filter(ref => ref.reward_granted !== true);
+            if (pendingRefs.length >= 2) {
+                const { data: user } = await sb
+                    .from('profiles')
+                    .select('spins_remaining')
+                    .eq('id', referrerId)
+                    .single();
+
+                if (user) {
+                    await sb
+                        .from('profiles')
+                        .update({ spins_remaining: (user.spins_remaining || 0) + 1 })
+                        .eq('id', referrerId);
+                }
+
+                const rewardIds = pendingRefs.slice(0, 2).map(ref => ref.id);
+                await sb
+                    .from('referrals')
+                    .update({ reward_granted: true })
+                    .in('id', rewardIds);
+            }
+
+            if (currentUser && currentUser.id === referrerId) {
+                const { data: refreshedProfile } = await sb
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', referrerId)
+                    .maybeSingle();
+
+                if (refreshedProfile) currentUser = refreshedProfile;
+                await refreshReferralProgress();
+                updateButtonState();
             }
         }
 
@@ -705,6 +823,7 @@ async function handleAuth(e) {
                 currentUser = data;
                 setupRealtime();
                 document.getElementById('navBagBtn').classList.remove('hidden');
+                await refreshReferralProgress();
                 updateButtonState();
             }
         }
@@ -882,16 +1001,17 @@ async function handleAuth(e) {
 
                 document.getElementById('winCount').innerText = bag ? bag.length : 0;
 
-                document.getElementById('resultTitle').innerText =
-                    (winner.near_miss || winner.prize_type === 'retry') ? "Almost" : winner.label;
+                const didWin = !(winner.near_miss || winner.prize_type === 'retry');
+                setResultWhatsAppState(didWin);
+
+                document.getElementById('resultTitle').innerText = didWin ? winner.label : "Almost";
 
                 document.getElementById('resultMsg').innerText =
-                    (winner.near_miss || winner.prize_type === 'retry')
-                        ? "Missed it by an inch! Message Emmytech on WhatsApp to ask for a bonus activation!"
-                        : `Good job ${currentUser.full_name.split(' ')[0]}. This is now saved in your bag. Message us to claim.`;
+                    didWin
+                        ? `Good job ${currentUser.full_name.split(' ')[0]}. This is now saved in your bag. Message us to claim.`
+                        : "You did not win this round, but you can message Emmytech to ask about bonus chances or how to get more spins.";
 
-                document.getElementById('modalEmoji').innerText =
-                    (winner.near_miss || winner.prize_type === 'retry') ? "🤏" : "🎉";
+                document.getElementById('modalEmoji').innerText = didWin ? "🎉" : "🤏";
 
                 document.getElementById('resultModal').classList.remove('hidden');
             } catch (err) {
@@ -899,6 +1019,7 @@ async function handleAuth(e) {
                 alert("Your spin finished, but we could not save the result properly. Please message support.");
             } finally {
                 spinning = false;
+                await refreshReferralProgress();
                 updateButtonState();
                 syncWheelData();
             }
@@ -968,11 +1089,20 @@ async function handleAuth(e) {
         function closeOutOfSpins() { document.getElementById('outOfSpinsModal').classList.add('hidden'); }
         function closeShareModal() { document.getElementById('shareModal').classList.add('hidden'); }
         
-        function claimViaWhatsApp(mode = 'WIN') { 
+        function claimViaWhatsApp(mode = lastSpinOutcome) { 
+            const firstName = currentUser?.full_name ? currentUser.full_name.split(' ')[0] : 'there';
             let msg = "";
-            if(mode === 'REGISTER') msg = `Hello Emmytech, I am coming from the wheel. I just registered and I am ready for my free spin activation!`;
-            else if(mode === 'DM') msg = `Hello Emmytech, I am coming from the wheel. I have used my spin and I would like to know how to get more spins!`;
-            else msg = `Hello Emmytech, I am coming from the wheel. I just won a prize and I would like to verify it!`;
+
+            if (mode === 'REGISTER') {
+                msg = `Hello Emmytech, my name is ${firstName}. I just registered on the wheel and I am ready for my free spin.`;
+            } else if (mode === 'DM') {
+                msg = `Hello Emmytech, my name is ${firstName}. I have used my spin and I would like to know how to get more spins.`;
+            } else if (mode === 'LOSE') {
+                msg = `Hello Emmytech, my name is ${firstName}. I just finished my spin but I did not win this round. Please share how I can get another spin or qualify for a bonus chance.`;
+            } else {
+                msg = `Hello Emmytech, my name is ${firstName}. I just won a prize on the wheel and I would like to verify and claim it.`;
+            }
+
             window.open(`https://wa.me/2348146503700?text=${encodeURIComponent(msg)}`); 
         }
 
