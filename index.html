@@ -659,7 +659,6 @@ async function handleAuth(e) {
                 }
             }
 
-            claimViaWhatsApp('REGISTER');
         }
 
         currentUser = profile;
@@ -668,7 +667,7 @@ async function handleAuth(e) {
         closeRegistration();
         document.getElementById('navBagBtn').classList.remove('hidden');
         updateButtonState();
-        setTimeout(performSpin, 800);
+        // Registration should only unlock the wheel; user decides when to spin.
     } catch (err) {
         console.error('Registration error:', err);
 
